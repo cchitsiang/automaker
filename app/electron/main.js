@@ -480,3 +480,23 @@ ipcMain.handle("auto-mode:context-exists", async (_, { projectPath, featureId })
     return { success: false, error: error.message };
   }
 });
+
+/**
+ * Analyze a new project - kicks off an agent to analyze the codebase
+ * and update the app_spec.txt with tech stack and implemented features
+ */
+ipcMain.handle("auto-mode:analyze-project", async (_, { projectPath }) => {
+  console.log("[IPC] auto-mode:analyze-project called with:", { projectPath });
+  try {
+    const sendToRenderer = (data) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("auto-mode:event", data);
+      }
+    };
+
+    return await autoModeService.analyzeProject({ projectPath, sendToRenderer });
+  } catch (error) {
+    console.error("[IPC] auto-mode:analyze-project error:", error);
+    return { success: false, error: error.message };
+  }
+});

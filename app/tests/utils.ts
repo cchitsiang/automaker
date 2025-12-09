@@ -1304,3 +1304,44 @@ export async function closeDialogWithEscape(page: Page): Promise<void> {
   await page.keyboard.press("Escape");
   await page.waitForTimeout(100); // Give dialog time to close
 }
+
+/**
+ * Wait for a toast notification with specific text to appear
+ */
+export async function waitForToast(
+  page: Page,
+  text: string,
+  options?: { timeout?: number }
+): Promise<Locator> {
+  const toast = page.locator(`[data-sonner-toast]:has-text("${text}")`).first();
+  await toast.waitFor({
+    timeout: options?.timeout ?? 5000,
+    state: "visible",
+  });
+  return toast;
+}
+
+/**
+ * Check if project analysis is in progress (analyzing spinner is visible)
+ */
+export async function isProjectAnalyzingVisible(page: Page): Promise<boolean> {
+  const analyzingText = page.locator('p:has-text("AI agent is analyzing")');
+  return await analyzingText.isVisible().catch(() => false);
+}
+
+/**
+ * Wait for project analysis to complete (no longer analyzing)
+ */
+export async function waitForProjectAnalysisComplete(
+  page: Page,
+  options?: { timeout?: number }
+): Promise<void> {
+  // Wait for the analyzing text to disappear
+  const analyzingText = page.locator('p:has-text("AI agent is analyzing")');
+  await analyzingText.waitFor({
+    timeout: options?.timeout ?? 10000,
+    state: "hidden",
+  }).catch(() => {
+    // It may never have been visible, that's ok
+  });
+}

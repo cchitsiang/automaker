@@ -66,6 +66,7 @@ export interface AutoModeAPI {
   verifyFeature: (projectPath: string, featureId: string) => Promise<{ success: boolean; passes?: boolean; error?: string }>;
   resumeFeature: (projectPath: string, featureId: string) => Promise<{ success: boolean; passes?: boolean; error?: string }>;
   contextExists: (projectPath: string, featureId: string) => Promise<{ success: boolean; exists?: boolean; error?: string }>;
+  analyzeProject: (projectPath: string) => Promise<{ success: boolean; message?: string; error?: string }>;
   onEvent: (callback: (event: AutoModeEvent) => void) => () => void;
 }
 
@@ -428,6 +429,113 @@ function createMockAutoModeAPI(): AutoModeAPI {
       // Mock implementation - simulate that context exists for some features
       const exists = mockFileSystem[`${projectPath}/.automaker/agents-context/${featureId}.md`] !== undefined;
       return { success: true, exists };
+    },
+
+    analyzeProject: async (projectPath: string) => {
+      // Simulate project analysis
+      const analysisId = `project-analysis-${Date.now()}`;
+      mockRunningFeatures.add(analysisId);
+
+      // Emit start event
+      emitAutoModeEvent({
+        type: "auto_mode_feature_start",
+        featureId: analysisId,
+        feature: {
+          id: analysisId,
+          category: "Project Analysis",
+          description: "Analyzing project structure and tech stack",
+        },
+      });
+
+      // Simulate analysis phases
+      await delay(300, analysisId);
+      if (!mockRunningFeatures.has(analysisId)) return { success: false, message: "Analysis aborted" };
+
+      emitAutoModeEvent({
+        type: "auto_mode_phase",
+        featureId: analysisId,
+        phase: "planning",
+        message: "Scanning project structure...",
+      });
+
+      emitAutoModeEvent({
+        type: "auto_mode_progress",
+        featureId: analysisId,
+        content: "Starting project analysis...\n",
+      });
+
+      await delay(500, analysisId);
+      if (!mockRunningFeatures.has(analysisId)) return { success: false, message: "Analysis aborted" };
+
+      emitAutoModeEvent({
+        type: "auto_mode_tool",
+        featureId: analysisId,
+        tool: "Glob",
+        input: { pattern: "**/*" },
+      });
+
+      await delay(300, analysisId);
+      if (!mockRunningFeatures.has(analysisId)) return { success: false, message: "Analysis aborted" };
+
+      emitAutoModeEvent({
+        type: "auto_mode_progress",
+        featureId: analysisId,
+        content: "Detected tech stack: Next.js, TypeScript, Tailwind CSS\n",
+      });
+
+      await delay(300, analysisId);
+      if (!mockRunningFeatures.has(analysisId)) return { success: false, message: "Analysis aborted" };
+
+      // Write mock app_spec.txt
+      mockFileSystem[`${projectPath}/.automaker/app_spec.txt`] = `<project_specification>
+  <project_name>Demo Project</project_name>
+
+  <overview>
+    A demo project analyzed by the Automaker AI agent.
+  </overview>
+
+  <technology_stack>
+    <frontend>
+      <framework>Next.js</framework>
+      <language>TypeScript</language>
+      <styling>Tailwind CSS</styling>
+    </frontend>
+  </technology_stack>
+
+  <core_capabilities>
+    - Web application
+    - Component-based architecture
+  </core_capabilities>
+
+  <implemented_features>
+    - Basic page structure
+    - Component library
+  </implemented_features>
+</project_specification>`;
+
+      // Ensure feature_list.json exists
+      if (!mockFileSystem[`${projectPath}/.automaker/feature_list.json`]) {
+        mockFileSystem[`${projectPath}/.automaker/feature_list.json`] = "[]";
+      }
+
+      emitAutoModeEvent({
+        type: "auto_mode_phase",
+        featureId: analysisId,
+        phase: "verification",
+        message: "Project analysis complete",
+      });
+
+      emitAutoModeEvent({
+        type: "auto_mode_feature_complete",
+        featureId: analysisId,
+        passes: true,
+        message: "Project analyzed successfully",
+      });
+
+      mockRunningFeatures.delete(analysisId);
+      mockAutoModeTimeouts.delete(analysisId);
+
+      return { success: true, message: "Project analyzed successfully" };
     },
 
     onEvent: (callback: (event: AutoModeEvent) => void) => {

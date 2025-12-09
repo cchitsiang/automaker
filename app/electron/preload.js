@@ -111,6 +111,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     contextExists: (projectPath, featureId) =>
       ipcRenderer.invoke("auto-mode:context-exists", { projectPath, featureId }),
 
+    // Analyze a new project - kicks off an agent to analyze codebase
+    analyzeProject: (projectPath) =>
+      ipcRenderer.invoke("auto-mode:analyze-project", { projectPath }),
+
     // Listen for auto mode events
     onEvent: (callback) => {
       const subscription = (_, data) => callback(data);

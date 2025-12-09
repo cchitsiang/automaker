@@ -1262,6 +1262,275 @@ Focus on one feature at a time and complete it fully before finishing. Always de
   sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+
+  /**
+   * Analyze a new project - scans codebase and updates app_spec.txt
+   * This is triggered when opening a project for the first time
+   */
+  async analyzeProject({ projectPath, sendToRenderer }) {
+    console.log(`[AutoMode] Analyzing project at: ${projectPath}`);
+
+    const analysisId = `project-analysis-${Date.now()}`;
+
+    // Check if already analyzing this project
+    if (this.runningFeatures.has(analysisId)) {
+      throw new Error("Project analysis is already running");
+    }
+
+    // Register as running
+    this.runningFeatures.set(analysisId, {
+      abortController: null,
+      query: null,
+      projectPath,
+      sendToRenderer,
+    });
+
+    try {
+      sendToRenderer({
+        type: "auto_mode_feature_start",
+        featureId: analysisId,
+        feature: {
+          id: analysisId,
+          category: "Project Analysis",
+          description: "Analyzing project structure and tech stack",
+        },
+      });
+
+      // Perform the analysis
+      const result = await this.runProjectAnalysis(projectPath, analysisId, sendToRenderer);
+
+      sendToRenderer({
+        type: "auto_mode_feature_complete",
+        featureId: analysisId,
+        passes: result.success,
+        message: result.message,
+      });
+
+      return { success: true, message: result.message };
+    } catch (error) {
+      console.error("[AutoMode] Error analyzing project:", error);
+      sendToRenderer({
+        type: "auto_mode_error",
+        error: error.message,
+        featureId: analysisId,
+      });
+      throw error;
+    } finally {
+      this.runningFeatures.delete(analysisId);
+    }
+  }
+
+  /**
+   * Run the project analysis using Claude Agent SDK
+   */
+  async runProjectAnalysis(projectPath, analysisId, sendToRenderer) {
+    console.log(`[AutoMode] Running project analysis for: ${projectPath}`);
+
+    const execution = this.runningFeatures.get(analysisId);
+    if (!execution) {
+      throw new Error(`Analysis ${analysisId} not registered in runningFeatures`);
+    }
+
+    try {
+      sendToRenderer({
+        type: "auto_mode_phase",
+        featureId: analysisId,
+        phase: "planning",
+        message: "Scanning project structure...",
+      });
+
+      const abortController = new AbortController();
+      execution.abortController = abortController;
+
+      const options = {
+        model: "claude-sonnet-4-20250514",
+        systemPrompt: this.getProjectAnalysisSystemPrompt(),
+        maxTurns: 50,
+        cwd: projectPath,
+        allowedTools: ["Read", "Glob", "Grep", "Bash"],
+        permissionMode: "acceptEdits",
+        sandbox: {
+          enabled: true,
+          autoAllowBashIfSandboxed: true,
+        },
+        abortController: abortController,
+      };
+
+      const prompt = this.buildProjectAnalysisPrompt(projectPath);
+
+      sendToRenderer({
+        type: "auto_mode_progress",
+        featureId: analysisId,
+        content: "Starting project analysis...\n",
+      });
+
+      const currentQuery = query({ prompt, options });
+      execution.query = currentQuery;
+
+      let responseText = "";
+      for await (const msg of currentQuery) {
+        if (!this.runningFeatures.has(analysisId)) break;
+
+        if (msg.type === "assistant" && msg.message?.content) {
+          for (const block of msg.message.content) {
+            if (block.type === "text") {
+              responseText += block.text;
+              sendToRenderer({
+                type: "auto_mode_progress",
+                featureId: analysisId,
+                content: block.text,
+              });
+            } else if (block.type === "tool_use") {
+              sendToRenderer({
+                type: "auto_mode_tool",
+                featureId: analysisId,
+                tool: block.name,
+                input: block.input,
+              });
+            }
+          }
+        }
+      }
+
+      execution.query = null;
+      execution.abortController = null;
+
+      sendToRenderer({
+        type: "auto_mode_phase",
+        featureId: analysisId,
+        phase: "verification",
+        message: "Project analysis complete",
+      });
+
+      return {
+        success: true,
+        message: "Project analyzed successfully",
+      };
+    } catch (error) {
+      if (error instanceof AbortError || error?.name === "AbortError") {
+        console.log("[AutoMode] Project analysis aborted");
+        if (execution) {
+          execution.abortController = null;
+          execution.query = null;
+        }
+        return {
+          success: false,
+          message: "Analysis aborted",
+        };
+      }
+
+      console.error("[AutoMode] Error in project analysis:", error);
+      if (execution) {
+        execution.abortController = null;
+        execution.query = null;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Build the prompt for project analysis
+   */
+  buildProjectAnalysisPrompt(projectPath) {
+    return `You are analyzing a new project that was just opened in Automaker, an autonomous AI development studio.
+
+**Your Task:**
+
+Analyze this project's codebase and update the .automaker/app_spec.txt file with accurate information about:
+
+1. **Project Name** - Detect the name from package.json, README, or directory name
+2. **Overview** - Brief description of what the project does
+3. **Technology Stack** - Languages, frameworks, libraries detected
+4. **Core Capabilities** - Main features and functionality
+5. **Implemented Features** - What features are already built
+
+**Steps to Follow:**
+
+1. First, explore the project structure:
+   - Look at package.json, cargo.toml, go.mod, requirements.txt, etc. for tech stack
+   - Check README.md for project description
+   - List key directories (src, lib, components, etc.)
+
+2. Identify the tech stack:
+   - Frontend framework (React, Vue, Next.js, etc.)
+   - Backend framework (Express, FastAPI, etc.)
+   - Database (if any config files exist)
+   - Testing framework
+   - Build tools
+
+3. Update .automaker/app_spec.txt with your findings in this format:
+   \`\`\`xml
+   <project_specification>
+     <project_name>Detected Name</project_name>
+
+     <overview>
+       Clear description of what this project does based on your analysis.
+     </overview>
+
+     <technology_stack>
+       <frontend>
+         <framework>Framework Name</framework>
+         <!-- Add detected technologies -->
+       </frontend>
+       <backend>
+         <!-- If applicable -->
+       </backend>
+       <database>
+         <!-- If applicable -->
+       </database>
+       <testing>
+         <!-- Testing frameworks detected -->
+       </testing>
+     </technology_stack>
+
+     <core_capabilities>
+       <!-- List main features/capabilities you found -->
+     </core_capabilities>
+
+     <implemented_features>
+       <!-- List specific features that appear to be implemented -->
+     </implemented_features>
+   </project_specification>
+   \`\`\`
+
+4. Ensure .automaker/feature_list.json exists (create as empty array [] if not)
+
+5. Ensure .automaker/context/ directory exists
+
+6. Ensure .automaker/agents-context/ directory exists
+
+7. Ensure .automaker/coding_prompt.md exists with default guidelines
+
+**Important:**
+- Be concise but accurate
+- Only include information you can verify from the codebase
+- If unsure about something, note it as "to be determined"
+- Don't make up features that don't exist
+
+Begin by exploring the project structure.`;
+  }
+
+  /**
+   * Get system prompt for project analysis agent
+   */
+  getProjectAnalysisSystemPrompt() {
+    return `You are a project analysis agent that examines codebases to understand their structure, tech stack, and implemented features.
+
+Your goal is to:
+- Quickly scan and understand project structure
+- Identify programming languages, frameworks, and libraries
+- Detect existing features and capabilities
+- Update the .automaker/app_spec.txt with accurate information
+- Ensure all required .automaker files and directories exist
+
+Be efficient - don't read every file, focus on:
+- Configuration files (package.json, tsconfig.json, etc.)
+- Main entry points
+- Directory structure
+- README and documentation
+
+You have read access to files and can run basic bash commands to explore the structure.`;
+  }
 }
 
 // Export singleton instance

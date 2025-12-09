@@ -50,12 +50,43 @@ export function WelcomeView() {
   const [isCreating, setIsCreating] = useState(false);
   const [isOpening, setIsOpening] = useState(false);
   const [showInitDialog, setShowInitDialog] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [initStatus, setInitStatus] = useState<{
     isNewProject: boolean;
     createdFiles: string[];
     projectName: string;
     projectPath: string;
   } | null>(null);
+
+  /**
+   * Kick off project analysis agent to analyze the codebase
+   */
+  const analyzeProject = useCallback(async (projectPath: string) => {
+    const api = getElectronAPI();
+
+    if (!api.autoMode?.analyzeProject) {
+      console.log("[Welcome] Auto mode API not available, skipping analysis");
+      return;
+    }
+
+    setIsAnalyzing(true);
+    try {
+      console.log("[Welcome] Starting project analysis for:", projectPath);
+      const result = await api.autoMode.analyzeProject(projectPath);
+
+      if (result.success) {
+        toast.success("Project analyzed", {
+          description: "AI agent has analyzed your project structure",
+        });
+      } else {
+        console.error("[Welcome] Project analysis failed:", result.error);
+      }
+    } catch (error) {
+      console.error("[Welcome] Failed to analyze project:", error);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }, []);
 
   /**
    * Initialize project and optionally kick off project analysis agent
@@ -93,9 +124,12 @@ export function WelcomeView() {
         });
         setShowInitDialog(true);
 
-        // TODO: Kick off agent to analyze the project and update app_spec.txt
-        // This will be implemented in a future iteration with the auto-mode service
+        // Kick off agent to analyze the project and update app_spec.txt
         console.log("[Welcome] Project initialized, created files:", initResult.createdFiles);
+        console.log("[Welcome] Kicking off project analysis agent...");
+
+        // Start analysis in background (don't await, let it run async)
+        analyzeProject(path);
       } else {
         toast.success("Project opened", {
           description: `Opened ${name}`,
@@ -109,7 +143,7 @@ export function WelcomeView() {
     } finally {
       setIsOpening(false);
     }
-  }, [addProject, setCurrentProject]);
+  }, [addProject, setCurrentProject, analyzeProject]);
 
   const handleOpenProject = useCallback(async () => {
     const api = getElectronAPI();
@@ -517,14 +551,23 @@ export function WelcomeView() {
 
             {initStatus?.isNewProject && (
               <div className="mt-4 p-3 rounded-lg bg-zinc-800/50 border border-white/5">
-                <p className="text-sm text-zinc-400">
-                  <span className="text-brand-400">Tip:</span> Edit the{" "}
-                  <code className="text-xs bg-zinc-800 px-1.5 py-0.5 rounded">
-                    app_spec.txt
-                  </code>{" "}
-                  file to describe your project. The AI agent will use this to
-                  understand your project structure.
-                </p>
+                {isAnalyzing ? (
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 text-brand-500 animate-spin" />
+                    <p className="text-sm text-brand-400">
+                      AI agent is analyzing your project structure...
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-zinc-400">
+                    <span className="text-brand-400">Tip:</span> Edit the{" "}
+                    <code className="text-xs bg-zinc-800 px-1.5 py-0.5 rounded">
+                      app_spec.txt
+                    </code>{" "}
+                    file to describe your project. The AI agent will use this to
+                    understand your project structure.
+                  </p>
+                )}
               </div>
             )}
           </div>
